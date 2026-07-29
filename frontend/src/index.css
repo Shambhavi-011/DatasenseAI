@@ -1,0 +1,9 @@
+/* ✅ Tailwind v4 style */
+@import "tailwindcss";
+
+body {
+  background-color: #0b1020; /* ds_bg */
+  color: #f9fafb;           /* text-gray-100-ish */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}

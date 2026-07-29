@@ -1,0 +1,5 @@
+Order_ID,Date,Product,Category,Region,Quantity,Revenue,Profit
+1,2026-01-10,Laptop,Electronics,North,2,100000,15000
+2,2026-01-11,Phone,Electronics,South,3,90000,12000
+3,2026-01-12,Chair,Furniture,West,4,20000,3000
+4,2026-02-01,Laptop,Electronics,North,1,50000,8000
