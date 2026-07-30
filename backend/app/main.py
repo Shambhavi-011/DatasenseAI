@@ -48,3 +48,10 @@ def database_health():
             status_code=503,
             detail="Database connection failed",
         )
+@app.get("/")
+def home():
+    return {
+        "message": "Welcome to DataSense AI Backend",
+        "docs": "/docs",
+        "health": "/health"
+    }
