@@ -1,306 +1,293 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, Link } from "react-router-dom";
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
-  Tooltip,
-  Legend,
   CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
 } from "recharts";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-const sampleData = [
-  { name: "Jan", revenue: 30 },
-  { name: "Feb", revenue: 45 },
-  { name: "Mar", revenue: 20 },
-  { name: "Apr", revenue: 60 },
-];
 function DatasetDashboardPage() {
   const { datasetId } = useParams();
-  const navigate = useNavigate();
 
+  const [dataset, setDataset] = useState(null);
+  const [previewRows, setPreviewRows] = useState([]);
+  const [columnNames, setColumnNames] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [preview, setPreview] = useState(null);
   const [regionChart, setRegionChart] = useState([]);
+  const [productChart, setProductChart] = useState([]);
+  const [monthlyChart, setMonthlyChart] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [chartErrors, setChartErrors] = useState({});
 
   useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadData() {
-      if (!API_BASE_URL) {
-        setErrorMessage("VITE_API_BASE_URL is missing in frontend .env.");
-        setLoading(false);
-        return;
-      }
-
-      if (!datasetId) {
-        setErrorMessage("Dataset ID is missing.");
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setErrorMessage("");
-
+    const fetchAllData = async () => {
       try {
-        const [summaryRes, previewRes, regionRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/summary`, {
-            signal: controller.signal,
-          }),
-          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/preview`, {
-            signal: controller.signal,
-          }),
-          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/charts/revenue-by-region`, {
-            signal: controller.signal,
-          }),
+        setLoading(true);
+        setPageError("");
+        setChartErrors({});
+
+        const [previewRes, summaryRes, regionRes, productRes, monthlyRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/preview`),
+          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/summary`),
+          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/charts/revenue-by-region`),
+          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/charts/revenue-by-product`),
+          fetch(`${API_BASE_URL}/api/datasets/${datasetId}/charts/monthly-revenue`),
         ]);
 
-        const summaryData = await summaryRes.json().catch(() => null);
-        const previewData = await previewRes.json().catch(() => null);
-        const regionData = await regionRes.json().catch(() => null);
-        if (!summaryRes.ok) {
-          const detail = summaryData?.detail || "Failed to load dataset summary.";
-          throw new Error(
-            typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)
-          );
-        }
+        const previewData = await previewRes.json();
+        const summaryData = await summaryRes.json();
+        const regionData = await regionRes.json();
+        const productData = await productRes.json();
+        const monthlyData = await monthlyRes.json();
 
-        if (!previewRes.ok) {
-          const detail = previewData?.detail || "Failed to load dataset preview.";
-          throw new Error(
-            typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)
-          );
-        }
+        if (!previewRes.ok) throw new Error(previewData?.detail || "Failed to load preview.");
+        if (!summaryRes.ok) throw new Error(summaryData?.detail?.message || summaryData?.detail || "Failed to load summary.");
 
-        setSummary(summaryData);
-        setPreview(previewData);
-        setRegionChart(regionData?.data || []);
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          setErrorMessage(error.message || "Something went wrong.");
-        }
+        setDataset(previewData.dataset);
+        setPreviewRows(previewData.preview_rows || []);
+        setColumnNames(previewData.column_names || []);
+        setSummary(summaryData.kpis || {});
+
+        if (regionRes.ok) setRegionChart(regionData.data || []);
+        else setChartErrors((prev) => ({ ...prev, region: regionData?.detail?.message || regionData?.detail || "Region chart failed." }));
+
+        if (productRes.ok) setProductChart(productData.data || []);
+        else setChartErrors((prev) => ({ ...prev, product: productData?.detail?.message || productData?.detail || "Product chart failed." }));
+
+        if (monthlyRes.ok) setMonthlyChart(monthlyData.data || []);
+        else setChartErrors((prev) => ({ ...prev, monthly: monthlyData?.detail?.message || monthlyData?.detail || "Monthly chart failed." }));
+      } catch (err) {
+        setPageError(err.message || "Something went wrong.");
       } finally {
         setLoading(false);
       }
-    }
+    };
 
-    loadData();
-    return () => controller.abort();
+    if (datasetId) fetchAllData();
   }, [datasetId]);
 
-  const dataset = summary?.dataset || preview?.dataset || null;
-  const rows = preview?.preview_rows || [];
-  const columns = preview?.column_names || [];
+  const kpiCards = useMemo(() => {
+    if (!summary) return [];
+    return [
+      { title: "Total Revenue", value: summary.total_revenue?.value ?? "-" },
+      { title: "Total Quantity Sold", value: summary.total_quantity_sold?.value ?? "-" },
+      { title: "Total Orders", value: summary.total_orders?.value ?? "-" },
+      {
+        title: "Top Product",
+        value: summary.top_selling_product_by_revenue?.value ?? "-",
+        sub: summary.top_selling_product_by_revenue?.revenue ? `Revenue: ${summary.top_selling_product_by_revenue.revenue}` : "",
+      },
+      {
+        title: "Top Region",
+        value: summary.top_region_by_revenue?.value ?? "-",
+        sub: summary.top_region_by_revenue?.revenue ? `Revenue: ${summary.top_region_by_revenue.revenue}` : "",
+      },
+    ];
+  }, [summary]);
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="text-sm text-emerald-400 hover:text-emerald-300"
-            >
-              ← Back to upload
-            </button>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight">
-              Dataset Dashboard
-            </h1>
-            <p className="mt-1 text-sm text-slate-400">
-              View summary KPIs and preview the first 10 rows.
-            </p>
-          </div>
-
-          {dataset && (
-            <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm">
-              <p className="text-slate-400">Dataset</p>
-              <p className="font-medium text-slate-100">{dataset.file_name}</p>
-            </div>
-          )}
-        </div>
-
-        {loading && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <div className="h-6 w-48 animate-pulse rounded bg-slate-800" />
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-800" />
-              ))}
-            </div>
-            <div className="mt-6 h-64 animate-pulse rounded-xl bg-slate-800" />
-          </div>
-        )}
-
-        {!loading && errorMessage && (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-6 text-red-300">
-            <p className="font-semibold">Error</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm">{errorMessage}</p>
-            <div className="mt-4">
-              <Link to="/" className="text-sm text-emerald-400 hover:text-emerald-300">
-                Go back to upload page
-              </Link>
-            </div>
-          </div>          
-          
-        )}
-
-        {!loading && !errorMessage && summary && preview && (
-          <div className="space-y-6">
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <KpiCard
-                label="Row count"
-                value={dataset?.row_count ?? "-"}
-                helper="Total rows in the uploaded dataset"
-              />
-              <KpiCard
-                label="Column count"
-                value={dataset?.column_count ?? "-"}
-                helper="Total columns detected"
-              />
-              <KpiCard
-                label="Total Revenue"
-                value={formatNumber(summary?.kpis?.total_revenue?.value)}
-                helper={summary?.kpis?.total_revenue?.meaning}
-              />
-              <KpiCard
-                label="Total Profit"
-                value={formatNumber(summary?.kpis?.total_profit?.value)}
-                helper={summary?.kpis?.total_profit?.meaning}
-              />
-            </section>
-
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <KpiCard
-                label="Total Orders"
-                value={formatNumber(summary?.kpis?.total_orders?.value)}
-                helper={summary?.kpis?.total_orders?.meaning}
-              />
-              <KpiCard
-                label="Top Product"
-                value={summary?.kpis?.top_selling_product_by_revenue?.value || "-"}
-                helper={`Revenue: ${formatNumber(
-                  summary?.kpis?.top_selling_product_by_revenue?.revenue
-                )}`}
-              />
-              <KpiCard
-                label="Top Region"
-                value={summary?.kpis?.top_region_by_revenue?.value || "-"}
-                helper={`Revenue: ${formatNumber(
-                  summary?.kpis?.top_region_by_revenue?.revenue
-                )}`}
-              />
-              <KpiCard
-                label="Dataset ID"
-                value={datasetId}
-                helper="Stored in the URL as a route param"
-              />
-            </section>
-            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-
-       <h2 className="text-xl font-semibold mb-5">
-        Revenue by Region
-           </h2>
-
-        <div style={{ width: "100%", height: 350 }}>
-       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={regionChart}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="region" />
-        <YAxis />
-        <Tooltip />
-        <Legend />
-        <Bar
-          dataKey="revenue"
-          fill="#10B981"
-          radius={[8, 8, 0, 0]}
-          />
-         </BarChart>
-         </ResponsiveContainer>
-         </div>
-
-        </section>
-            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold">Preview Table</h2>
-                  <p className="text-sm text-slate-400">
-                    First 10 rows from the dataset.
-                  </p>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Columns detected: {columns.length}
-                </p>
-              </div>
-
-              {rows.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-700 p-6 text-sm text-slate-500">
-                  No preview rows found.
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-800">
-                  <table className="min-w-full divide-y divide-slate-800 text-sm">
-                    <thead className="bg-slate-950">
-                      <tr>
-                        {columns.map((col) => (
-                          <th
-                            key={col}
-                            className="px-4 py-3 text-left font-medium text-slate-300"
-                          >
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800 bg-slate-900">
-                      {rows.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/40">
-                          {columns.map((col) => (
-                            <td key={col} className="px-4 py-3 text-slate-200">
-                              {String(row[col] ?? "-")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </div>
-        )}
-
-        {!loading && !errorMessage && !summary && !preview && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-slate-400">
-            No data available.
-          </div>
-        )}
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 1200, margin: "40px auto", padding: 20 }}>
+        <h2>Loading dashboard...</h2>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-function KpiCard({ label, value, helper }) {
+  if (pageError) {
+    return (
+      <div style={{ maxWidth: 1200, margin: "40px auto", padding: 20 }}>
+        <h2 style={{ color: "red" }}>Error</h2>
+        <p>{pageError}</p>
+        <Link to="/">Go back to upload page</Link>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg shadow-black/20">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-100">{value}</p>
-      <p className="mt-2 text-xs leading-5 text-slate-400">{helper}</p>
+    <div style={{ maxWidth: 1200, margin: "40px auto", padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 20 }}>
+        <div>
+          <h1 style={{ marginBottom: 8 }}>Dataset Dashboard</h1>
+          <p style={{ margin: 0 }}>
+            {dataset?.file_name || "Dataset"} | ID: {datasetId}
+          </p>
+        </div>
+        <Link
+          to="/"
+          style={{
+            display: "inline-block",
+            padding: "10px 16px",
+            borderRadius: 8,
+            background: "#111827",
+            color: "#fff",
+            textDecoration: "none",
+          }}
+        >
+          Upload another file
+        </Link>
+      </div>
+
+      <section style={{ marginTop: 30 }}>
+        <h2>Summary KPIs</h2>
+        {kpiCards.length === 0 ? (
+          <p>No summary data available.</p>
+        ) : (
+          <div style={kpiGridStyle}>
+            {kpiCards.map((card) => (
+              <div key={card.title} style={cardStyle}>
+                <h3 style={{ marginTop: 0 }}>{card.title}</h3>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{card.value}</div>
+                {card.sub ? <small>{card.sub}</small> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: 40 }}>
+        <h2>Preview</h2>
+        <p>Showing first {previewRows.length} rows.</p>
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                {columnNames.map((col) => (
+                  <th key={col} style={thTdStyle}>{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {previewRows.length > 0 ? (
+                previewRows.map((row, index) => (
+                  <tr key={index}>
+                    {columnNames.map((col) => (
+                      <td key={col} style={thTdStyle}>
+                        {row[col] !== null && row[col] !== undefined ? String(row[col]) : "-"}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td style={thTdStyle} colSpan={Math.max(columnNames.length, 1)}>
+                    No preview rows available.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section style={{ marginTop: 40 }}>
+        <h2>Revenue by Region</h2>
+        {chartErrors.region ? <p style={{ color: "red" }}>{chartErrors.region}</p> : null}
+        {regionChart.length > 0 ? (
+          <div style={chartBoxStyle}>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={regionChart}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="region" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="revenue" fill="#4f46e5" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          !chartErrors.region && <p>No region chart data available.</p>
+        )}
+      </section>
+
+      <section style={{ marginTop: 40 }}>
+        <h2>Revenue by Product</h2>
+        {chartErrors.product ? <p style={{ color: "red" }}>{chartErrors.product}</p> : null}
+        {productChart.length > 0 ? (
+          <div style={chartBoxStyle}>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={productChart}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="product" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="revenue" fill="#16a34a" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          !chartErrors.product && <p>No product chart data available.</p>
+        )}
+      </section>
+
+      <section style={{ marginTop: 40 }}>
+        <h2>Monthly Revenue</h2>
+        {chartErrors.monthly ? <p style={{ color: "red" }}>{chartErrors.monthly}</p> : null}
+        {monthlyChart.length > 0 ? (
+          <div style={chartBoxStyle}>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={monthlyChart}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="revenue" stroke="#dc2626" strokeWidth={3} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          !chartErrors.monthly && <p>No monthly chart data available.</p>
+        )}
+      </section>
     </div>
   );
 }
 
-function formatNumber(value) {
-  if (value === null || value === undefined || value === "") return "-";
-  const num = Number(value);
-  if (Number.isNaN(num)) return String(value);
-  return new Intl.NumberFormat("en-IN").format(num);
-}
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 16,
+  marginTop: 16,
+};
+
+const cardStyle = {
+  border: "1px solid #ddd",
+  borderRadius: 12,
+  padding: 16,
+  background: "#fff",
+  boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+};
+
+const tableStyle = {
+  width: "100%",
+  borderCollapse: "collapse",
+  minWidth: 800,
+};
+
+const thTdStyle = {
+  border: "1px solid #ddd",
+  padding: "10px 12px",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+};
+
+const chartBoxStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  padding: 16,
+  background: "#fff",
+};
 
 export default DatasetDashboardPage;

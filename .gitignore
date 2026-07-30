@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Database
+*.db
+
+# Uploads
+backend/uploads/
+
+# Environment files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Build folders
+dist/
+build/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+backend/data/*.db

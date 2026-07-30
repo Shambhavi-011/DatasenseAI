@@ -302,3 +302,182 @@ def get_dataset_summary(dataset_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not generate dataset summary: {str(e)}",
         )
+@router.get("/{dataset_id}/charts/revenue-by-region")
+def revenue_by_region_chart(dataset_id: int):
+    try:
+        dataset = get_dataset_record(dataset_id)
+        df = load_dataset_as_dataframe(dataset.table_name)
+        df = rename_dataframe_columns(df)
+
+        required_columns = {
+            "region": "Used to group revenue by region.",
+            "revenue": "Used to calculate total revenue.",
+        }
+
+        missing_columns = validate_required_columns(df, required_columns)
+        if missing_columns:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "This dataset is missing required columns for region chart.",
+                    "missing_columns": missing_columns,
+                    "available_columns": list(df.columns),
+                },
+            )
+
+        df["region"] = df["region"].fillna("Unknown").astype(str).str.strip()
+        df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce").fillna(0)
+
+        chart_df = (
+            df.groupby("region", dropna=False)["revenue"]
+            .sum()
+            .reset_index()
+            .sort_values("revenue", ascending=False)
+        )
+
+        if chart_df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No revenue data found for region chart.",
+            )
+
+        return {
+            "title": "Revenue by Region",
+            "chart_type": "bar",
+            "x_axis": "region",
+            "y_axis": "revenue",
+            "data": chart_df.to_dict(orient="records"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not generate revenue by region chart: {str(e)}",
+        )
+
+
+@router.get("/{dataset_id}/charts/revenue-by-product")
+def revenue_by_product_chart(dataset_id: int):
+    try:
+        dataset = get_dataset_record(dataset_id)
+        df = load_dataset_as_dataframe(dataset.table_name)
+        df = rename_dataframe_columns(df)
+
+        required_columns = {
+            "product": "Used to group revenue by product.",
+            "revenue": "Used to calculate product revenue totals.",
+        }
+
+        missing_columns = validate_required_columns(df, required_columns)
+        if missing_columns:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "This dataset is missing required columns for product chart.",
+                    "missing_columns": missing_columns,
+                    "available_columns": list(df.columns),
+                },
+            )
+
+        df["product"] = df["product"].fillna("Unknown").astype(str).str.strip()
+        df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce").fillna(0)
+
+        chart_df = (
+            df.groupby("product", dropna=False)["revenue"]
+            .sum()
+            .reset_index()
+            .sort_values("revenue", ascending=False)
+        )
+
+        if chart_df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No revenue data found for product chart.",
+            )
+
+        return {
+            "title": "Revenue by Product",
+            "chart_type": "bar",
+            "x_axis": "product",
+            "y_axis": "revenue",
+            "data": chart_df.to_dict(orient="records"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not generate revenue by product chart: {str(e)}",
+        )
+
+
+@router.get("/{dataset_id}/charts/monthly-revenue")
+def monthly_revenue_chart(dataset_id: int):
+    try:
+        dataset = get_dataset_record(dataset_id)
+        df = load_dataset_as_dataframe(dataset.table_name)
+        df = rename_dataframe_columns(df)
+
+        date_aliases = ["date", "order_date", "transaction_date", "created_at"]
+        date_column = None
+        for candidate in date_aliases:
+            if candidate in df.columns:
+                date_column = candidate
+                break
+
+        if not date_column:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "This dataset is missing a valid date column for monthly chart.",
+                    "required_date_columns": date_aliases,
+                    "available_columns": list(df.columns),
+                },
+            )
+
+        if "revenue" not in df.columns:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Revenue column is required for monthly revenue chart.",
+                    "available_columns": list(df.columns),
+                },
+            )
+
+        df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce").fillna(0)
+        df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
+
+        valid_df = df.dropna(subset=[date_column]).copy()
+        if valid_df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid dates found in the dataset.",
+            )
+
+        valid_df["month"] = valid_df[date_column].dt.to_period("M").astype(str)
+
+        chart_df = (
+            valid_df.groupby("month", dropna=False)["revenue"]
+            .sum()
+            .reset_index()
+            .sort_values("month")
+        )
+
+        return {
+            "title": "Monthly Revenue Trend",
+            "chart_type": "line",
+            "x_axis": "month",
+            "y_axis": "revenue",
+            "data": chart_df.to_dict(orient="records"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not generate monthly revenue chart: {str(e)}",
+        )
