@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, status
 from sqlalchemy import Table, MetaData, select
 from sqlalchemy.exc import SQLAlchemyError, NoSuchTableError
 from app.database import engine
+from app.services.chart_service import generate_dynamic_charts
+from app.services.summary_service import generate_summary
 from app.models import Dataset
 from app.services.dataset_fields import (
     normalize_column_name,
@@ -481,3 +483,40 @@ def monthly_revenue_chart(dataset_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not generate monthly revenue chart: {str(e)}",
         )
+    
+@router.get("/{dataset_id}/dynamic-summary")
+def get_dynamic_summary(dataset_id: int):
+    try:
+        dataset = get_dataset_record(dataset_id)
+        df = load_dataset_as_dataframe(dataset.table_name)
+        df = rename_dataframe_columns(df)
+
+        summary = generate_summary(df)
+
+        return {
+            "dataset": {
+                "dataset_id": dataset.id,
+                "file_name": dataset.file_name,
+                "table_name": dataset.table_name,
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count,
+            },
+            **summary,
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+@router.get("/{dataset_id}/dynamic-charts")
+def get_dynamic_charts(dataset_id: int):
+
+    dataset = get_dataset_record(dataset_id)
+
+    df = load_dataset_as_dataframe(dataset.table_name)
+
+    df = rename_dataframe_columns(df)
+
+    return generate_dynamic_charts(df)
