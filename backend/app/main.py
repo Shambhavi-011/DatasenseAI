@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import Base, engine
 from app.routes.upload import router as upload_router
 
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="DataSense AI API")

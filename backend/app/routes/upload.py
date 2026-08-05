@@ -12,10 +12,21 @@ from app.services.dataset_fields import (
 )
 import pandas as pd
 import re
+from pydantic import BaseModel
+class AskRequest(BaseModel):
+    question: str
+
+from app.services.groq_service import ask_groq
+from app.schemas.ai import AskRequest
 
 
+from app.prompts.sql_prompt import build_sql_prompt
+from app.services.groq_service import ask_groq
+from app.services.ai_parser import parse_ai_response
+
+
+from utils.sql_validator import parse_sql, validate_sql
 router = APIRouter(prefix="/api/datasets", tags=["Datasets"])
-
 
 def get_dataset_record(dataset_id: int):
     with engine.connect() as connection:
@@ -520,3 +531,66 @@ def get_dynamic_charts(dataset_id: int):
     df = rename_dataframe_columns(df)
 
     return generate_dynamic_charts(df)
+
+@router.post("/{dataset_id}/ask")
+def ask_dataset(dataset_id: int, request: AskRequest):
+
+    try:
+        dataset = get_dataset_record(dataset_id)
+
+        df = load_dataset_as_dataframe(dataset.table_name)
+
+        df = rename_dataframe_columns(df)
+
+        columns = list(df.columns)
+
+        prompt = build_sql_prompt(
+            table_name=dataset.table_name,
+            columns=columns,
+            question=request.question
+        )
+
+        ai_response = ask_groq(prompt)
+
+        parsed = parse_ai_response(ai_response)
+
+        # Validate AI-generated SQL
+        validate_sql(
+            sql=parsed["sql_query"],
+            table_name=dataset.table_name,
+            allowed_columns=columns
+        )
+
+        return {
+            "dataset": dataset.file_name,
+            "table": dataset.table_name,
+            "columns": columns,
+            "ai": parsed
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Groq failed: {str(e)}"
+        )
+
+@router.get("/test-validator")
+def test_validator():
+
+    sql = """
+    SELECT region,
+           SUM(revenue) AS total_revenue
+    FROM dataset_demo
+    GROUP BY region
+    LIMIT 100
+    """
+
+    validate_sql(
+        sql=sql,
+        table_name="dataset_demo",
+        allowed_columns=["region", "revenue"]
+    )
+
+    return {
+        "status": "VALID SQL"
+    }

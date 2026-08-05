@@ -10,13 +10,16 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { askDataset } from "../services/askService";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 function DatasetDashboardPage() {
   const { datasetId } = useParams();
-
+  
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [dataset, setDataset] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [columnNames, setColumnNames] = useState([]);
@@ -192,6 +195,145 @@ function DatasetDashboardPage() {
           </table>
         </div>
       </section>
+
+      <section style={{ marginTop: 50 }}>
+
+     <h2>🤖 Ask Your Data</h2>
+
+       <p style={{ color: "#666" }}>
+           Ask questions about any uploaded dataset using natural language.
+         </p>
+
+          <input
+  type="text"
+  value={question}
+  onChange={(e) => setQuestion(e.target.value)}
+  placeholder="Example: Find the highest values, summarize this dataset, show trends, detect missing values..."
+  style={{
+    width: "100%",
+    padding: "14px",
+    fontSize: "16px",
+    borderRadius: "10px",
+    border: "1px solid #ddd",
+    marginTop: "15px",
+  }}
+/>
+
+<div
+  style={{
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px",
+    marginTop: "20px",
+  }}
+>
+  {[
+    "Summarize this dataset",
+    "Show important trends",
+    "Which column contains the highest values?",
+    "Are there any missing values?",
+    "Show distribution of numeric columns",
+  ].map((item) => (
+    <button
+      key={item}
+      onClick={() => setQuestion(item)}
+      style={{
+        padding: "8px 14px",
+        borderRadius: "20px",
+        border: "1px solid #ccc",
+        background: "#f5f5f5",
+        cursor: "pointer",
+      }}
+    >
+      {item}
+    </button>
+  ))}
+</div>
+
+<button
+  onClick={async () => {
+    if (!question.trim()) return;
+
+    try {
+      setAnswer("Thinking...");
+
+      // Future backend integration
+      const result = await askDataset(datasetId, question);
+
+setAnswer(result.answer);
+
+      setAnswer(
+              );
+    } catch (err) {
+      setAnswer("Something went wrong.");
+    }
+  }}
+  style={{
+    marginTop: "18px",
+    padding: "12px 24px",
+    background: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+  }}
+>
+  Ask
+</button>
+<div
+  style={{
+    marginTop: "30px",
+    border: "1px solid #ddd",
+    borderRadius: "12px",
+    padding: "20px",
+    background: "#fafafa",
+  }}
+>
+  <h3>Answer</h3>
+
+  {answer ? (
+    <p>{answer}</p>
+  ) : (
+    <p style={{ color: "#888" }}>
+      Ask a question to see the response here.
+    </p>
+  )}
+
+  <hr style={{ margin: "20px 0" }} />
+
+  <h3>Table</h3>
+
+  <div
+    style={{
+      height: "120px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      border: "1px dashed #bbb",
+      borderRadius: "8px",
+    }}
+  >
+    Table will appear here after backend integration.
+  </div>
+
+  <hr style={{ margin: "20px 0" }} />
+
+  <h3>Chart</h3>
+
+  <div
+    style={{
+      height: "220px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      border: "1px dashed #bbb",
+      borderRadius: "8px",
+    }}
+  >
+    Chart will appear here after backend integration.
+  </div>
+</div>
+</section>
 
       <section style={{ marginTop: 40 }}>
         <h2>Dynamic Bar Chart</h2>
