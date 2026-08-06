@@ -28,6 +28,11 @@ from app.services.ai_parser import parse_ai_response
 from utils.sql_validator import parse_sql, validate_sql
 router = APIRouter(prefix="/api/datasets", tags=["Datasets"])
 
+from app.services.sql_executor import (
+    execute_sql,
+    dataframe_to_json,
+)
+
 def get_dataset_record(dataset_id: int):
     with engine.connect() as connection:
         dataset_result = connection.execute(
@@ -553,19 +558,30 @@ def ask_dataset(dataset_id: int, request: AskRequest):
         ai_response = ask_groq(prompt)
 
         parsed = parse_ai_response(ai_response)
+        
+        print("========== AI RESPONSE ==========")
+        print(parsed)
+        print(type(parsed))
+        print("=================================")
 
-        # Validate AI-generated SQL
-        validate_sql(
+        print("SQL:", parsed.get("sql_query"))
+        
+        validated_sql = validate_sql(
             sql=parsed["sql_query"],
             table_name=dataset.table_name,
             allowed_columns=columns
         )
 
+        df_result = execute_sql(validated_sql)
+
+        result = dataframe_to_json(df_result)
+
         return {
             "dataset": dataset.file_name,
             "table": dataset.table_name,
             "columns": columns,
-            "ai": parsed
+            "ai": parsed,
+            "result": result
         }
 
     except Exception as e:

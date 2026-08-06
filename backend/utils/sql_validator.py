@@ -65,7 +65,7 @@ def validate_sql(sql: str, table_name: str, allowed_columns: list):
     if "LIMIT" not in sql_upper:
         sql += " LIMIT 100"
 
-    return 
+    return sql
 
 def validate_table(parsed_sql, allowed_table: str):
     """
