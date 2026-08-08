@@ -33,6 +33,13 @@ from app.services.sql_executor import (
     dataframe_to_json,
 )
 
+from app.config import (
+    CSV_CHUNK_SIZE,
+    SQL_INSERT_BATCH_SIZE,
+    MAX_COLUMNS,
+    MAX_ROWS,
+)
+
 def get_dataset_record(dataset_id: int):
     with engine.connect() as connection:
         dataset_result = connection.execute(
@@ -75,9 +82,32 @@ def validate_columns(df: pd.DataFrame, required_columns: dict):
 
     return df
 
+def get_csv_schema(file):
+    """
+    Read only the CSV header to determine the dataset schema.
+    """
+    header_df = pd.read_csv(file.file, nrows=0)
+
+    if header_df.empty and len(header_df.columns) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded CSV file has no columns.",
+        )
+
+    header_df = rename_dataframe_columns(header_df)
+
+    if len(header_df.columns) > MAX_COLUMNS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSV contains too many columns. Maximum allowed: {MAX_COLUMNS}.",
+        )
+
+    return list(header_df.columns)
+
 
 @router.post("/upload")
 async def upload_dataset(file: UploadFile = File(...)):
+
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -85,36 +115,113 @@ async def upload_dataset(file: UploadFile = File(...)):
         )
 
     try:
-        df = pd.read_csv(file.file)
+        # Start from beginning of uploaded file
+        file.file.seek(0)
 
-        if df.empty:
+        # Read only header to detect schema
+        header_df = pd.read_csv(file.file, nrows=0)
+
+        if len(header_df.columns) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded CSV has no columns.",
+            )
+
+        header_df = rename_dataframe_columns(header_df)
+
+        # Column limit
+        if MAX_COLUMNS > 0 and len(header_df.columns) > MAX_COLUMNS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"CSV contains too many columns. Maximum allowed: {MAX_COLUMNS}.",
+            )
+
+        column_names = list(header_df.columns)
+
+        # Reset file pointer before reading actual data
+        file.file.seek(0)
+
+        # Generate safe table name
+        safe_table_name = (
+            f"dataset_"
+            f"{file.filename.rsplit('.', 1)[0].lower().replace(' ', '_')}"
+        )
+
+        safe_table_name = re.sub(
+            r"[^a-z0-9_]+",
+            "_",
+            safe_table_name
+        )
+
+        total_rows = 0
+        final_table_name = None
+
+        # Read CSV in chunks
+        chunks = pd.read_csv(
+            file.file,
+            chunksize=CSV_CHUNK_SIZE
+        )
+
+        with engine.begin() as connection:
+
+            existing_tables = connection.dialect.get_table_names(
+                connection
+            )
+
+            final_table_name = safe_table_name
+            counter = 1
+
+            while final_table_name in existing_tables:
+                final_table_name = f"{safe_table_name}_{counter}"
+                counter += 1
+
+            first_chunk = True
+
+            for chunk in chunks:
+
+                # Rename columns consistently
+                chunk = rename_dataframe_columns(chunk)
+
+                # Row limit (0 = unlimited)
+                if MAX_ROWS > 0:
+                    remaining_rows = MAX_ROWS - total_rows
+
+                    if remaining_rows <= 0:
+                        break
+
+                    chunk = chunk.iloc[:remaining_rows]
+
+                if chunk.empty:
+                    continue
+
+                # Insert chunk into SQLite
+                chunk.to_sql(
+                    final_table_name,
+                    connection,
+                    index=False,
+                    if_exists="replace" if first_chunk else "append",
+                    chunksize=SQL_INSERT_BATCH_SIZE,
+                )
+
+                total_rows += len(chunk)
+
+                first_chunk = False
+
+        if total_rows == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded CSV file is empty.",
             )
 
-        df = rename_dataframe_columns(df)
-
-        safe_table_name = f"dataset_{file.filename.rsplit('.', 1)[0].lower().replace(' ', '_')}"
-        safe_table_name = re.sub(r"[^a-z0-9_]+", "_", safe_table_name)
-
+        # Save dataset metadata
         with engine.begin() as connection:
-            existing_tables = connection.dialect.get_table_names(connection)
-
-            final_table_name = safe_table_name
-            counter = 1
-            while final_table_name in existing_tables:
-                final_table_name = f"{safe_table_name}_{counter}"
-                counter += 1
-
-            df.to_sql(final_table_name, connection, index=False, if_exists="fail")
 
             insert_result = connection.execute(
                 Dataset.__table__.insert().values(
                     file_name=file.filename,
                     table_name=final_table_name,
-                    row_count=len(df),
-                    column_count=len(df.columns),
+                    row_count=total_rows,
+                    column_count=len(column_names),
                 )
             )
 
@@ -126,20 +233,20 @@ async def upload_dataset(file: UploadFile = File(...)):
                 "dataset_id": dataset_id,
                 "file_name": file.filename,
                 "table_name": final_table_name,
-                "row_count": len(df),
-                "column_count": len(df.columns),
-                "column_names": list(df.columns),
+                "row_count": total_rows,
+                "column_count": len(column_names),
+                "column_names": column_names,
             },
         }
 
     except HTTPException:
         raise
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not upload dataset: {str(e)}",
         )
-
 
 @router.get("")
 def list_datasets():

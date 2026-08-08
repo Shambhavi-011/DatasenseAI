@@ -38,6 +38,11 @@ def validate_sql(sql: str, table_name: str, allowed_columns: list):
 
     validate_table(parsed, table_name)
 
+    validate_columns(
+    parsed,
+    allowed_columns
+)
+
     sql_upper = sql.upper()
 
     # Only SELECT
@@ -84,5 +89,44 @@ def validate_table(parsed_sql, allowed_table: str):
         raise Exception(
             f"Invalid table '{table_name}'. Allowed table is '{allowed_table}'."
         )
+
+    return True
+ALLOWED_FUNCTIONS = {
+    "SUM",
+    "COUNT",
+    "AVG",
+    "MIN",
+    "MAX",
+    "ROUND",
+    "LOWER",
+    "UPPER",
+    "LENGTH"
+}
+from sqlglot import exp
+
+
+def validate_columns(parsed_sql, allowed_columns):
+
+    allowed = {c.lower() for c in allowed_columns}
+
+    for column in parsed_sql.find_all(exp.Column):
+
+        name = column.name
+
+        if name == "*":
+            continue
+
+        if name.lower() not in allowed:
+            raise Exception(
+                f"Invalid column '{name}'."
+            )
+
+    for func in parsed_sql.find_all(exp.Anonymous):
+
+        if func.name.upper() not in ALLOWED_FUNCTIONS:
+
+            raise Exception(
+                f"Function '{func.name}' is not allowed."
+            )
 
     return True
