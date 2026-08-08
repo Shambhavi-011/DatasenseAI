@@ -11,6 +11,10 @@ venv/
 backend/uploads/
 
 # Environment files
+# Environment files
+backend/.env
+frontend/.env
+
 .env
 .env.*
 
