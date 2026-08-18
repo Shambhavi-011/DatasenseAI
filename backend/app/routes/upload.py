@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, status
 from sqlalchemy import Table, MetaData, select
 from sqlalchemy.exc import SQLAlchemyError, NoSuchTableError
+import logging
 from app.database import engine
 from app.services.chart_service import generate_dynamic_charts
 from app.services.summary_service import generate_summary
@@ -12,13 +13,8 @@ from app.services.dataset_fields import (
 )
 import pandas as pd
 import re
-from pydantic import BaseModel
-class AskRequest(BaseModel):
-    question: str
-
-from app.services.groq_service import ask_groq
 from app.schemas.ai import AskRequest
-
+from app.services.sql_executor import execute_sql
 
 from app.prompts.sql_prompt import build_sql_prompt
 from app.services.groq_service import ask_groq
@@ -39,6 +35,46 @@ from app.config import (
     MAX_COLUMNS,
     MAX_ROWS,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+FILE_SNIFF_BYTES = 8192
+
+
+def validate_upload_file(file: UploadFile) -> None:
+    """Reject uploads that are clearly not usable CSV text before parsing."""
+    filename = (file.filename or "").strip()
+
+    if not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A CSV file with a filename is required.",
+        )
+
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV files are allowed.",
+        )
+
+    file.file.seek(0)
+    sample = file.file.read(FILE_SNIFF_BYTES)
+    file.file.seek(0)
+
+    if not sample:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded CSV file is empty.",
+        )
+
+    if b"\x00" in sample:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file must be a text CSV file.",
+        )
+
 
 def get_dataset_record(dataset_id: int):
     with engine.connect() as connection:
@@ -64,6 +100,17 @@ def get_dataset_record(dataset_id: int):
 def load_dataset_as_dataframe(table_name: str) -> pd.DataFrame:
     query = f'SELECT * FROM "{table_name}"'
     return pd.read_sql_query(query, engine)
+
+
+def get_dataset_column_names(table_name: str) -> list[str]:
+    metadata = MetaData()
+    dataset_table = Table(
+        table_name,
+        metadata,
+        autoload_with=engine,
+    )
+
+    return list(dataset_table.columns.keys())
 
 
 def validate_columns(df: pd.DataFrame, required_columns: dict):
@@ -108,13 +155,9 @@ def get_csv_schema(file):
 @router.post("/upload")
 async def upload_dataset(file: UploadFile = File(...)):
 
-    if not file.filename.lower().endswith(".csv"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only CSV files are allowed.",
-        )
-
     try:
+        validate_upload_file(file)
+
         # Start from beginning of uploaded file
         file.file.seek(0)
 
@@ -242,10 +285,17 @@ async def upload_dataset(file: UploadFile = File(...)):
     except HTTPException:
         raise
 
-    except Exception as e:
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is not a valid CSV file.",
+        )
+
+    except Exception:
+        logger.exception("Failed to process uploaded CSV")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not upload dataset: {str(e)}",
+            detail="Could not process the uploaded CSV file.",
         )
 
 @router.get("")
@@ -281,10 +331,11 @@ def list_datasets():
                 "datasets": datasets,
             }
 
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
+        logger.exception("Failed to list datasets")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not fetch datasets: {str(e)}",
+            detail="Unable to retrieve datasets.",
         )
 
 
@@ -331,10 +382,11 @@ def preview_dataset(dataset_id: int):
 
     except HTTPException:
         raise
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
+        logger.exception("Failed to load dataset preview for dataset_id=%s", dataset_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not load dataset preview: {str(e)}",
+            detail="Unable to load the dataset preview.",
         )
 
 
@@ -422,10 +474,11 @@ def get_dataset_summary(dataset_id: int):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to generate dataset summary for dataset_id=%s", dataset_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not generate dataset summary: {str(e)}",
+            detail="Unable to generate the dataset summary.",
         )
 @router.get("/{dataset_id}/charts/revenue-by-region")
 def revenue_by_region_chart(dataset_id: int):
@@ -476,10 +529,14 @@ def revenue_by_region_chart(dataset_id: int):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "Failed to generate revenue-by-region chart for dataset_id=%s",
+            dataset_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not generate revenue by region chart: {str(e)}",
+            detail="Unable to generate the revenue-by-region chart.",
         )
 
 
@@ -532,10 +589,14 @@ def revenue_by_product_chart(dataset_id: int):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "Failed to generate revenue-by-product chart for dataset_id=%s",
+            dataset_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not generate revenue by product chart: {str(e)}",
+            detail="Unable to generate the revenue-by-product chart.",
         )
 
 
@@ -601,10 +662,14 @@ def monthly_revenue_chart(dataset_id: int):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "Failed to generate monthly revenue chart for dataset_id=%s",
+            dataset_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not generate monthly revenue chart: {str(e)}",
+            detail="Unable to generate the monthly revenue chart.",
         )
     
 @router.get("/{dataset_id}/dynamic-summary")
@@ -627,26 +692,17 @@ def get_dynamic_summary(dataset_id: int):
             **summary,
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to generate dynamic summary for dataset_id=%s", dataset_id)
         raise HTTPException(
             status_code=500,
-            detail=str(e),
+            detail="Unable to generate the dataset summary.",
         )
 
 @router.get("/{dataset_id}/dynamic-charts")
 def get_dynamic_charts(dataset_id: int):
-
-    dataset = get_dataset_record(dataset_id)
-
-    df = load_dataset_as_dataframe(dataset.table_name)
-
-    df = rename_dataframe_columns(df)
-
-    return generate_dynamic_charts(df)
-
-@router.post("/{dataset_id}/ask")
-def ask_dataset(dataset_id: int, request: AskRequest):
-
     try:
         dataset = get_dataset_record(dataset_id)
 
@@ -654,7 +710,23 @@ def ask_dataset(dataset_id: int, request: AskRequest):
 
         df = rename_dataframe_columns(df)
 
-        columns = list(df.columns)
+        return generate_dynamic_charts(df)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to generate dynamic charts for dataset_id=%s", dataset_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to generate charts for this dataset.",
+        )
+
+@router.post("/{dataset_id}/ask")
+def ask_dataset(dataset_id: int, request: AskRequest):
+
+    try:
+        dataset = get_dataset_record(dataset_id)
+
+        columns = get_dataset_column_names(dataset.table_name)
 
         prompt = build_sql_prompt(
             table_name=dataset.table_name,
@@ -665,19 +737,29 @@ def ask_dataset(dataset_id: int, request: AskRequest):
         ai_response = ask_groq(prompt)
 
         parsed = parse_ai_response(ai_response)
-        
-        print("========== AI RESPONSE ==========")
-        print(parsed)
-        print(type(parsed))
-        print("=================================")
 
-        print("SQL:", parsed.get("sql_query"))
-        
-        validated_sql = validate_sql(
-            sql=parsed["sql_query"],
-            table_name=dataset.table_name,
-            allowed_columns=columns
+        logger.debug(
+            "Parsed AI response for dataset_id=%s; sql_query_present=%s",
+            dataset_id,
+            bool(parsed.get("sql_query")),
         )
+
+        try:
+            validated_sql = validate_sql(
+                sql=parsed["sql_query"],
+                table_name=dataset.table_name,
+                allowed_columns=columns
+            )
+        except Exception as exc:
+            logger.warning(
+                "Generated SQL validation failed for dataset_id=%s; error_type=%s",
+                dataset_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The generated query is not permitted for this dataset.",
+            )
 
         df_result = execute_sql(validated_sql)
 
@@ -691,29 +773,40 @@ def ask_dataset(dataset_id: int, request: AskRequest):
             "result": result
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+           "Failed to process ask request for dataset_id=%s",
+         dataset_id,
+   )
+        logger.error(
+        "Failed to process ask request for dataset_id=%s; error_type=%s",
+          dataset_id,
+        type(e).__name__,
+   )
         raise HTTPException(
-            status_code=500,
-            detail=f"Groq failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to process your question. Please try again.",
         )
 
 @router.get("/test-validator")
-def test_validator():
+def test_validator(sql: str = ""):
+    try:
+        validated_sql = validate_sql(
+            sql=sql,
+            table_name="dataset_demo",
+            allowed_columns=["region", "revenue"]
+        )
 
-    sql = """
-    SELECT region,
-           SUM(revenue) AS total_revenue
-    FROM dataset_demo
-    GROUP BY region
-    LIMIT 100
-    """
+        return {
+            "status": "VALID SQL",
+            "validated_sql": validated_sql
+        }
 
-    validate_sql(
-        sql=sql,
-        table_name="dataset_demo",
-        allowed_columns=["region", "revenue"]
-    )
-
-    return {
-        "status": "VALID SQL"
-    }
+    except Exception as e:
+        logger.exception("SQL validator test endpoint failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SQL validation failed."
+        )
