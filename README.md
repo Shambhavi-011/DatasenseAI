@@ -1,4 +1,4 @@
-📊 DataSense AI
+## 📊 DataSense AI
 
 > **AI-powered data analytics platform that lets you explore, analyze, and interact with your datasets using natural language.**
 
