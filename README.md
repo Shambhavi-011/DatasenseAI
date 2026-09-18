@@ -38,3 +38,18 @@ Show total sales by product.
 What is the average value?
 
 Which category has the highest count?
+
+## 📄 License & Credits
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+### ✍️ Author & Attribution
+Developed with ❤️ by **[Shambhavi]**. 
+If you are using this project, mining its data, or adapting the AI models, giving appropriate credit is highly appreciated!
+
+* **GitHub:** [@Shambhavi-011](https://github.com)
+* **Project Repository:** [datsenseai](https://github.com/datsenseai)
+
+---
+*Note: As per the MIT License, you are free to use, modify, and distribute this software, but you **must include** the original copyright notice and license permission in any substantial copies of the software.*
+
