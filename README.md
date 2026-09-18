@@ -1,4 +1,4 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/c28ef2a8-194f-49bb-8683-b5d3e2dba7b1" /># 📊 DataSense AI
+📊 DataSense AI
 
 > **AI-powered data analytics platform that lets you explore, analyze, and interact with your datasets using natural language.**
 
