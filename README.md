@@ -1,4 +1,4 @@
-# 📊 DataSense AI
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/c28ef2a8-194f-49bb-8683-b5d3e2dba7b1" /># 📊 DataSense AI
 
 > **AI-powered data analytics platform that lets you explore, analyze, and interact with your datasets using natural language.**
 
@@ -38,7 +38,7 @@ Show total sales by product.
 What is the average value?
 
 Which category has the highest count?
-
+```
 ## 📄 License & Credits
 
 This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
@@ -52,4 +52,6 @@ If you are using this project, mining its data, or adapting the AI models, givin
 
 ---
 *Note: As per the MIT License, you are free to use, modify, and distribute this software, but you **must include** the original copyright notice and license permission in any substantial copies of the software.*
+
+
 
